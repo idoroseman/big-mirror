@@ -32,17 +32,23 @@ for i, f in enumerate(os.listdir("database/")):
         name = open(os.path.join(database_path, f, "name.txt"), "r").read().strip()
     else:  
         name = f
-    generate_audio_file(f"היי {name}", f, f"greeting_0")
+    generate_audio_file(f"היי {name}", f, f"name")
+    if os.path.exists(os.path.join(database_path, f, "greetings.txt")):
+        lines = open(os.path.join(database_path, f, "greetings.txt"), "r").readlines()
+        for index, text in enumerate(lines):
+            if text.strip() == "":
+                continue
+            generate_audio_file(text, f, f"greetings_{index}")
 
 # generate audio files from text files
-for f in [x for x in os.listdir("audio/") if x.endswith(".txt")]:
+for f in [x for x in os.listdir(database_path) if x.endswith(".txt")]:
     if f.startswith('.'):
         continue
     name = os.path.splitext(f)[0]
-    with open(f"audio/{f}", "r", encoding="utf-8", errors='ignore') as file:
+    with open(os.path.join(database_path,f), "r", encoding="utf-8", errors='ignore') as file:
         lines = file.readlines()
         for index, text in enumerate(lines):
             if text.strip() == "":
                 continue
-            generate_audio_file(text, name, index)
+            generate_audio_file(text, name, f"greetings_{index}")
     

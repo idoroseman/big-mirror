@@ -3,6 +3,7 @@
 **/*.jpeg
 **/*.png
 *.mp3
+audio/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
