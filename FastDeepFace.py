@@ -5,6 +5,7 @@ import pickle
 from typing import List, Union, Optional, Dict, Any, Set, IO, cast
 import time
 import cv2
+from datetime import datetime
 
 # 3rd party dependencies
 import numpy as np
@@ -294,7 +295,7 @@ class FastDeepFace:
         if not faces:
             return
 
-        filename = os.path.join(self.tmp_path, f"temp_{self.get_next_id()}.jpg")
+        filename = os.path.join(self.tmp_path, f"temp_{datetime.today().strftime('%Y-%m-%d-%H-%M-%S')}.jpg")
         cv2.imwrite(filename, frame)
         hash = image_utils.find_image_hash(filename)
         # Append new faces to representations
@@ -684,7 +685,7 @@ class FastDeepFace:
                         )
                     except ValueError as err:
                         cv2.imwrite(
-                            os.path.join(self.tmp_path, f"error_{self.get_next_id()}.jpg"), img_content)
+                            os.path.join(self.tmp_path, f"error_{datetime.today().strftime('%Y-%m-%d-%H-%M-%S')}.jpg"), img_content)
                         demographies = [{"dominant_gender": "unknown"}]
                     representations.append(
                         {
