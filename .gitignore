@@ -2,8 +2,12 @@
 **/*.jpg
 **/*.jpeg
 **/*.png
-*.mp3
+*.mp4
+*.pickle
+*.pkl
 audio/
+tmp/
+temp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
