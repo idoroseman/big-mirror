@@ -45,7 +45,7 @@ for i, f in enumerate(os.listdir("database/")):
         for index, text in enumerate(lines):
             if text.strip() == "":
                 continue
-            generate_audio_file(text, f, f"greetings_{index}")
+            generate_audio_file(text, f, f"greetings-{hex(hash(text))}")
 
 # generate audio files from text files
 for f in [x for x in os.listdir(database_path) if x.endswith(".txt")]:
@@ -57,5 +57,5 @@ for f in [x for x in os.listdir(database_path) if x.endswith(".txt")]:
         for index, text in enumerate(lines):
             if text.strip() == "":
                 continue
-            generate_audio_file(text, name, f"greetings_{index}")
+            generate_audio_file(text, name, f"greetings-{hex(hash(text))}")
     
