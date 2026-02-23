@@ -1,5 +1,7 @@
 # built-in dependencies
 from asyncio.log import logger
+from cProfile import label
+from cProfile import label
 import os
 import pickle
 from typing import List, Union, Optional, Dict, Any, Set, IO, cast
@@ -25,7 +27,6 @@ from deepface.modules.exceptions import (
 )
 from deepface.commons.logger import Logger
 
-LAST_SEEN_TIMEOUT = 30  # seconds
 
 class FastDeepFace:
 
@@ -93,6 +94,7 @@ class FastDeepFace:
     anti_spoofing: bool = False
     batched: bool = False
     representations: list = None
+    faces: dict = None
     numerator: int = 0
 
     # pylint: disable=too-many-arguments, too-many-positional-arguments
@@ -152,7 +154,7 @@ class FastDeepFace:
         self.numerator += 1
         return self.numerator
     
-    def load_database(self, db_path: str = "database") -> None:
+    def load_database(self) -> None:
         """
         Prepares the facial database by ensuring that all images in the specified
         database path are processed and their embeddings are stored for future
@@ -197,7 +199,6 @@ class FastDeepFace:
             "target_y",
             "target_w",
             "target_h",
-            "gender",
         }
 
         # check each item of representations list has required keys
@@ -284,7 +285,27 @@ class FastDeepFace:
         # now, we got representations for facial database
         self.pretuned_threshold = verification.find_threshold(self.model_name, self.distance_metric)
 
-    def append_to_database(self, faces, frame) -> None:
+        self.faces = {}
+        for k,v in self.faces_in_database().items():
+            self.faces[k] = {
+                "count": v, 
+                "last_seen": 0, 
+                "frame_count": 0, 
+                "gender": None,
+                "unknown": k.startswith("Unknown")
+            }
+
+    def faces_in_database(self) -> List[str]:
+        """
+        Get the list of identities currently in the database.
+
+        Returns:
+            List[str]: A list of identity labels for the faces currently stored in the database.
+        """
+        names = sorted([rep["identity"].split("/")[1] for rep in self.representations])
+        return {x:names.count(x) for x in set(names)}
+    
+    def append_new_to_database(self, dfs, min_confidence) -> None:
         """
         Append new faces to the database.
 
@@ -292,71 +313,99 @@ class FastDeepFace:
             faces (list): List of face data to append.
             frame (np.ndarray): The original image frame containing the faces.
         """
-        if not faces:
-            return
 
         filename = os.path.join(self.tmp_path, f"temp_{datetime.today().strftime('%Y-%m-%d-%H-%M-%S')}.jpg")
-        cv2.imwrite(filename, frame)
-        hash = image_utils.find_image_hash(filename)
+        hash = 0 # image_utils.find_image_hash(filename)
+        need_to_save = False
         # Append new faces to representations
-        for x, y, w, h, left_eye, right_eye, embedding, confidence, is_real, label, conf, gender, last_seen, frame_count  in faces:
-            if not label.startswith("Unknown"):
+        for indx, df in enumerate(dfs):
+            if df.empty:
                 continue
+            dataframe = df.iloc[0]
+            if dataframe["confidence"] > min_confidence:
+                continue
+
+            need_to_save = True
+            label = f"Unknown{self.get_next_id()}"
+            try:
+                demographies = demography.analyze(
+                    img_path=self.img_path[dataframe['target_y']:dataframe['target_y']+dataframe['target_h'], dataframe['target_x']:dataframe['target_x']+dataframe['target_w']],
+                    actions=["gender"],
+                    enforce_detection=self.enforce_detection,
+                    detector_backend=self.detector_backend,
+                    align=self.align,
+                    expand_percentage=self.expand_percentage,
+                    silent=self.silent,
+                    anti_spoofing=self.anti_spoofing,
+                )
+                gender = demographies[0]["dominant_gender"] if len(demographies) > 0 else "Unknown"
+            except:
+                gender = "Unknown"
             print(f"+++ adding {label}")
-            demographies = demography.analyze(
-                img_path=frame[y:y+h, x:x+w],
-                actions=["gender"],
-                enforce_detection=self.enforce_detection,
-                detector_backend=self.detector_backend,
-                align=self.align,
-                expand_percentage=self.expand_percentage,
-                silent=self.silent,
-                anti_spoofing=self.anti_spoofing,
-            )
+            df["identity"] = label
             self.representations.append({
                 "identity": os.path.join(label, label+".jpg"),
-                "hash": hash,
-                "embedding": embedding,
-                "target_x": x,
-                "target_y": y,
-                "target_w": w,
-                "target_h": h,
+                "hash": label,
+                "embedding": self.source_objs[indx]["embedding"],
+                "target_x": dataframe["target_x"],
+                "target_y": dataframe["target_y"],
+                "target_w": dataframe["target_w"],
+                "target_h": dataframe["target_h"],
                 "left_eye": None,
                 "right_eye": None,
-                "gender": demographies[0]["dominant_gender"],
+            })
+            self.faces[label] = {
+                "gender": gender,
                 "last_seen": 0,
                 "frame_count": 0,
-            })
-
-    def do_housekeeping(self, faces) -> None:
+                "unknown": label.startswith("Unknown")
+            }
+        if need_to_save:
+            cv2.imwrite(filename, self.img_path)
+        return dfs
+    
+    def do_housekeeping(self, dfs, last_seen_timeout: float = 30.0) -> None:
         now = time.time()
-        for idx, (x, y, w, h, left_eye, right_eye, embedding, confidence, is_real,  label, confidence2, gender, last_seen, frame_count) in enumerate(faces):
-            found = None
-            for rep in self.representations:
-                if rep["identity"].startswith(label): 
-                    found = rep
-                    break
-            if found is not None:
-                found["last_seen"] = now
-                found["frame_count"] += 1
-        dumping = [rep["identity"] for rep in self.representations if rep["identity"].startswith("Unknown") and now - rep["last_seen"] >= LAST_SEEN_TIMEOUT] 
-        if len(dumping)>0:
-            print(f"--- Dumping {dumping} ") 
-        self.representations = [rep for rep in self.representations if not rep["identity"].startswith("Unknown") or now - rep["last_seen"] < LAST_SEEN_TIMEOUT] 
-        
+        for df in dfs:
+            if df.empty:
+                continue
+            dataframe = df.iloc[0]
+            label = dataframe["identity"].split("/")[0] if dataframe["identity"].startswith("Unknown") else dataframe["identity"].split("/")[1]
+            if label not in self.faces:
+                print("unobserved face:", label)
+                continue
+            self.faces[label]["last_seen"] = now
+            self.faces[label]["frame_count"] += 1
+            if self.faces[label]['gender'] == "Unknown":
+                thumbnail = self.img_path[dataframe['source_y']:dataframe['source_y']+dataframe['source_h'], dataframe['source_x']:dataframe['source_x']+dataframe['source_w']]
+                try:
+                    demographies = demography.analyze(
+                        img_path=thumbnail,    
+                        actions=["gender"],
+                        enforce_detection=self.enforce_detection,
+                        detector_backend=self.detector_backend,
+                        align=self.align,
+                        expand_percentage=self.expand_percentage,
+                        silent=self.silent,
+                        anti_spoofing=self.anti_spoofing,
+                    )
+                    self.faces[label]["gender"] = demographies[0]["dominant_gender"] if len(demographies) > 0 else "Unknown"
+                except:
+                    pass
+
         # dump stale unknowns
-        dumping = [rep["identity"] for rep in self.representations if rep["identity"].startswith("Unknown") and now - rep["last_seen"] >= LAST_SEEN_TIMEOUT] 
+        dumping = [k for k, v in self.faces.items() if v["unknown"] and v["last_seen"] > 0 and now - v["last_seen"] >= last_seen_timeout] 
         if len(dumping)>0:
-            print(f"--- Dumping {dumping} ") 
-        self.representations = [rep for rep in self.representations if not rep["identity"].startswith("Unknown") or now - rep["last_seen"] < LAST_SEEN_TIMEOUT] 
-
+            print(f"--- Dumping {dumping} ")             
+            self.representations = [rep for rep in self.representations if not rep["hash"] in dumping] 
+            self.faces = {k:v for k,v in self.faces.items() if not k in dumping}
+        
         # reset frame_count for old knowns
-        for rep in self.representations:
-            if "last_seen" not in rep:
-                rep["last_seen"] = 0
-            if not rep["identity"].startswith("Unknown") and rep["last_seen"]>0 and now - rep["last_seen"] >= LAST_SEEN_TIMEOUT:
-                rep["frame_count"] = 0
+        for k,v in self.faces.items():
+            if not v["unknown"] and v["last_seen"]>0 and now - v["last_seen"] >= last_seen_timeout:
+                v["frame_count"] = 0
 
+    
     def extract_faces(self, 
                     img_path: Union[str, NDArray[Any], IO[bytes]]
         ) -> List[Any]:
@@ -575,6 +624,7 @@ class FastDeepFace:
             if self.k is not None and len(result_df) > self.k:
                 result_df = result_df.head(self.k)
 
+            # print(result_df[["identity", "distance", "confidence"]])
             resp_obj.append(result_df)
 
         # -----------------------------------
@@ -653,9 +703,6 @@ class FastDeepFace:
                         "target_y": 0,
                         "target_w": 0,
                         "target_h": 0,
-                        "gender": "unknown",
-                        "last_seen": 0,
-                        "frame_count": 0,
                     }
                 )
             else:
@@ -696,9 +743,6 @@ class FastDeepFace:
                             "target_y": img_region["y"],
                             "target_w": img_region["w"],
                             "target_h": img_region["h"],
-                            "gender": demographies[0]["dominant_gender"],
-                            "last_seen": 0,
-                            "frame_count": 0,
                         }
                     )
 
