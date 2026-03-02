@@ -24,12 +24,12 @@ LAST_SEEN_TIMEOUT = 30
 def sound_loop(queue):
     global now_playing
     pygame.mixer.init()
-    print("[INFO] Sound loop started, waiting for messages...")
+    print("[SOUND] Sound loop started, waiting for messages...")
     while True:
         msg = queue.get()  # Read from the queue and do nothing
         if msg == "DONE":
             break
-        print(f"[INFO] Playing sound: {msg}")
+        print(f"[SOUND] Playing sound: {msg}")
         now_playing = msg
         try:
             pygame.mixer.music.load(msg)
@@ -39,7 +39,7 @@ def sound_loop(queue):
         except Exception as e:
           pass
         now_playing = None
-    print("[INFO] Sound loop exiting...")
+    print("[SOUND] Sound loop exiting...")
 
 
 def playsound(name):
@@ -73,11 +73,11 @@ def draw_results(orig, dfaces=None):
     now = time.time()
 
     cv2.putText(frame, f"{len(dfaces)} identities", (10, 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (127, 0, 255), 1)
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (127, 0, 255), 1)
     
     if now_playing:
-        cv2.putText(frame, f"Playing: {os.path.basename(now_playing)}", (10, frame.shape[0] - 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (127, 0, 255), 1)
+        cv2.putText(frame, f"Playing: {os.path.basename(now_playing)}", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (127, 0, 255), 1)
     for idx, face_obj in enumerate(dff.source_objs):
         try:
             data_frame = dfaces[idx].iloc[0]
@@ -154,7 +154,7 @@ if __name__ == '__main__':
         # Calculate and update FPS
         current_fps = calculate_fps()
         cv2.putText(display_frame, f"FPS: {current_fps:.1f}", (display_frame.shape[1] - 150, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1)
         
         # Display everything over the video feed.
         cv2.imshow('Face Rec Running', display_frame)
@@ -162,15 +162,14 @@ if __name__ == '__main__':
         # sound logic
         new_knowns = [k for k,v in dff.faces.items() if v["frame_count"] == MIN_FRAME_COUNT and not k.startswith("Unknown")]
         for name in new_knowns:
-            print(f"[INFO] New known detected: {name}")
+            print(f"[LOGIC] New known detected: {name}")
             playsound(name)
             dff.faces[name]["frame_count"] += 1 # dont get stuck
 
         stable_faces = [(k, v["gender"]) for k,v in dff.faces.items() if v["frame_count"] >= MIN_FRAME_COUNT]
         if len(stable_faces) > prev_stable_count:
-            print(f"[INFO] Stable faces count changed {len(stable_faces)} (Previous: {prev_stable_count})")
+            print(f"[LOGIC] Stable faces count changed {len(stable_faces)} (Previous: {prev_stable_count})")
             if len(stable_faces) == 1 :
-                print(f"[INFO] Single stable face detected: {stable_faces[0][0]} ({stable_faces[0][1]})")
                 if stable_faces[0][1]=="Man":
                     playsound("unknown_m")
                 else:
